@@ -176,12 +176,25 @@
       </div>
       <footer>
         <span id="meta" class="muted"></span>
-        <span><a id="vimeo-link" href="#" target="_blank" rel="noreferrer">Open on Vimeo</a> · Recorded with Cannoli</span>
+        <!-- TODO(owner, 2026-09-16): once Cannoli has a website, make "Recorded with Cannoli" a link to it
+             (set CANNOLI_SITE below; the span becomes an <a> automatically). -->
+        <span><a id="vimeo-link" href="#" target="_blank" rel="noreferrer">Open on Vimeo</a> · <span id="credit">Recorded with Cannoli</span></span>
       </footer>
     </main>
 
     <script src="https://player.vimeo.com/api/player.js"></script>
     <script>
+      // Cannoli's website — empty until there is one. When set, the footer credit links to it.
+      const CANNOLI_SITE = ''
+      if (CANNOLI_SITE) {
+        const credit = document.getElementById('credit')
+        const a = document.createElement('a')
+        a.href = CANNOLI_SITE
+        a.target = '_blank'
+        a.rel = 'noreferrer'
+        a.textContent = credit.textContent
+        credit.replaceWith(a)
+      }
       ;(async () => {
         const q = new URLSearchParams(location.search)
         const v = q.get('v')
