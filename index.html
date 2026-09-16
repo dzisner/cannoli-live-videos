@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Loading…</title>
+    <!--
+      Cannoli watch page. Static, no backend: host this single file anywhere (e.g. https://your-domain/watch/)
+      and put that URL in Settings → Branded shortlinks → "Links open → watch page URL". The app appends
+      ?v=<vimeo id>&h=<unlisted hash>. Everything shown here is read live from Vimeo:
+        · title + description (= the Cannoli summary)  → oEmbed
+        · chapters                                      → player.getChapters()
+        · captions on from the first frame              → player.enableTextTrack(first track)
+      Optional params: cc=<lang> (preferred caption language), t=<title> (fallback when oEmbed is blocked,
+      e.g. password-protected videos).
+    -->
+    <style>
+      :root {
+        --bg: #14161a;
+        --panel: #1c1f25;
+        --border: #2e333d;
+        --text: #e6e8ec;
+        --muted: #8b93a1;
+        --accent: #e4572e;
+        --accent-2: #f2a65a;
+        color-scheme: dark;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f6f5f2;
+          --panel: #ffffff;
+          --border: #e2e0da;
+          --text: #1b1d22;
+          --muted: #6b7280;
+          --accent: #d14a22;
+          --accent-2: #b8651b;
+          color-scheme: light;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 20px 16px 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0;
+        line-height: 1.3;
+      }
+      .player {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      .player iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 300px;
+        gap: 16px;
+        align-items: start;
+      }
+      @media (max-width: 760px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+      }
+      .card h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .summary {
+        white-space: pre-wrap;
+        margin: 0;
+      }
+      .chapters {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .chapters button {
+        all: unset;
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .chapters button:hover,
+      .chapters button.current {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+      }
+      .chapters time {
+        font-family: Consolas, 'Cascadia Mono', ui-monospace, monospace;
+        font-size: 12px;
+        color: var(--accent-2);
+        min-width: 44px;
+      }
+      [dir='rtl'] .chapters time {
+        text-align: right;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      footer a {
+        color: var(--accent-2);
+        text-decoration: none;
+      }
+      footer a:hover {
+        text-decoration: underline;
+      }
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="main">
+      <h1 id="title">&nbsp;</h1>
+      <div class="player" id="player"></div>
+      <div class="grid">
+        <section class="card" id="summary-card">
+          <h2 id="summary-heading">Summary</h2>
+          <p class="summary" id="summary"></p>
+        </section>
+        <aside class="card hidden" id="chapters-card">
+          <h2 id="chapters-heading">Chapters</h2>
+          <ul class="chapters" id="chapters"></ul>
+        </aside>
+      </div>
+      <footer>
+        <span id="meta" class="muted"></span>
+        <span><a id="vimeo-link" href="#" target="_blank" rel="noreferrer">Open on Vimeo</a> · Recorded with Cannoli</span>
+      </footer>
+    </main>
+
+    <script src="https://player.vimeo.com/api/player.js"></script>
+    <script>
+      ;(async () => {
+        const q = new URLSearchParams(location.search)
+        const v = q.get('v')
+        const h = q.get('h')
+        const cc = q.get('cc')
+        const $ = (id) => document.getElementById(id)
+        const isRtl = (s) => ((s || '').match(/[֐-ࣿ]/g) || []).length > ((s || '').match(/[A-Za-z]/g) || []).length
+        const clock = (sec) => {
+          const t = Math.max(0, Math.round(sec))
+          const hh = Math.floor(t / 3600)
+          const mm = Math.floor((t % 3600) / 60)
+          const ss = t % 60
+          return (hh ? hh + ':' + String(mm).padStart(2, '0') : mm) + ':' + String(ss).padStart(2, '0')
+        }
+        // Hebrew UI strings when the content is Hebrew.
+        const setHeadings = (rtl) => {
+          $('summary-heading').textContent = rtl ? 'תקציר' : 'Summary'
+          $('chapters-heading').textContent = rtl ? 'פרקים' : 'Chapters'
+        }
+
+        if (!v) {
+          $('title').textContent = 'No video specified'
+          $('summary').textContent = 'This page expects ?v=<video id>&h=<hash> — the app appends them to every link.'
+          return
+        }
+        const vimeoUrl = 'https://vimeo.com/' + v + (h ? '/' + h : '')
+        $('vimeo-link').href = vimeoUrl
+        if (q.get('t')) $('title').textContent = q.get('t')
+
+        // 1. Player, captions on as soon as a track exists.
+        //    The iframe is built by hand (player.js's own oEmbed lookup 404s for unlisted ids + hash).
+        const src = new URL('https://player.vimeo.com/video/' + encodeURIComponent(v))
+        if (h) src.searchParams.set('h', h)
+        if (cc) src.searchParams.set('texttrack', cc)
+        for (const [k, val] of [['byline', '0'], ['portrait', '0'], ['title', '0'], ['dnt', '1'], ['pip', '1']]) src.searchParams.set(k, val)
+        const iframe = document.createElement('iframe')
+        iframe.src = src.toString()
+        iframe.allow = 'autoplay; fullscreen; picture-in-picture; clipboard-write'
+        iframe.allowFullscreen = true
+        iframe.title = 'Video player'
+        $('player').appendChild(iframe)
+        const player = new Vimeo.Player(iframe)
+        player.on('error', (e) => {
+          $('summary').textContent = e && e.message ? e.message : 'The video could not be loaded.'
+        })
+        try {
+          await player.ready()
+          const tracks = await player.getTextTracks()
+          if (tracks.length && !tracks.some((t) => t.mode === 'showing')) {
+            const pick = (cc && tracks.find((t) => t.language === cc)) || tracks[0]
+            await player.enableTextTrack(pick.language, pick.kind).catch(() => {})
+          }
+        } catch (_) {
+          /* player unavailable — the error handler wrote the message */
+        }
+
+        // 2. Title + description (= the summary) via oEmbed. Password-protected videos refuse this;
+        //    fall back to the player's title and hide the summary card.
+        let title = q.get('t') || ''
+        let description = ''
+        try {
+          const r = await fetch('https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(vimeoUrl))
+          if (r.ok) {
+            const j = await r.json()
+            title = j.title || title
+            description = (j.description || '').trim()
+          }
+        } catch (_) {
+          /* offline / blocked */
+        }
+        if (!title) title = await player.getVideoTitle().catch(() => '')
+        const rtl = isRtl(title + ' ' + description)
+        document.documentElement.dir = rtl ? 'rtl' : 'ltr'
+        document.documentElement.lang = rtl ? 'he' : 'en'
+        setHeadings(rtl)
+        document.title = title || 'Recording'
+        $('title').textContent = title || ' '
+        if (description) {
+          $('summary').textContent = description
+          $('summary').dir = isRtl(description) ? 'rtl' : 'ltr'
+        } else $('summary-card').classList.add('hidden')
+
+        // 3. Chapters straight from the player.
+        let chapters = []
+        try {
+          chapters = await player.getChapters()
+        } catch (_) {
+          /* none */
+        }
+        if (chapters.length) {
+          $('chapters-card').classList.remove('hidden')
+          const ul = $('chapters')
+          for (const ch of chapters) {
+            const li = document.createElement('li')
+            const b = document.createElement('button')
+            b.dataset.start = ch.startTime
+            const t = document.createElement('time')
+            t.textContent = clock(ch.startTime)
+            const s = document.createElement('span')
+            s.textContent = ch.title
+            s.dir = isRtl(ch.title) ? 'rtl' : 'ltr'
+            b.append(t, s)
+            b.addEventListener('click', async () => {
+              await player.setCurrentTime(ch.startTime).catch(() => {})
+              player.play().catch(() => {})
+            })
+            li.appendChild(b)
+            ul.appendChild(li)
+          }
+          player.on('timeupdate', ({ seconds }) => {
+            let current = null
+            for (const btn of ul.querySelectorAll('button')) if (Number(btn.dataset.start) <= seconds) current = btn
+            for (const btn of ul.querySelectorAll('button')) btn.classList.toggle('current', btn === current)
+          })
+        }
+
+        try {
+          const dur = await player.getDuration()
+          if (dur) $('meta').textContent = clock(dur)
+        } catch (_) {
+          /* ignore */
+        }
+      })()
+    </script>
+  </body>
+</html>
