@@ -256,7 +256,8 @@
         let title = q.get('t') || ''
         let description = ''
         try {
-          const r = await fetch('https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(vimeoUrl))
+          // no-store: a rename in the app must show on the next open, not after the browser's cache expires.
+          const r = await fetch('https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(vimeoUrl) + '&_=' + Date.now(), { cache: 'no-store' })
           if (r.ok) {
             const j = await r.json()
             title = j.title || title
