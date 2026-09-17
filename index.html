@@ -12,8 +12,9 @@
         · title + description (= the Cannoli summary)  → oEmbed
         · chapters                                      → player.getChapters()
         · captions on from the first frame              → player.enableTextTrack(first track)
-      Optional params: cc=<lang> (preferred caption language), t=<title> (fallback when oEmbed is blocked,
-      e.g. password-protected videos).
+      Optional params: cc=<lang> (preferred caption language), t=<title> and d=<deflate-raw + base64url
+      summary> — the app adds both for password-protected / private videos, where Vimeo refuses oEmbed.
+      Chapters and captions are read from the player once the viewer has unlocked it.
     -->
     <style>
       :root {
@@ -223,6 +224,20 @@
         const vimeoUrl = 'https://vimeo.com/' + v + (h ? '/' + h : '')
         $('vimeo-link').href = vimeoUrl
         if (q.get('t')) $('title').textContent = q.get('t')
+        // Summary carried in the link (password-protected videos): deflate-raw, base64url.
+        const unpack = async (s) => {
+          if (!s) return ''
+          try {
+            const bin = Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+            const ds = new DecompressionStream('deflate-raw')
+            const w = ds.writable.getWriter()
+            w.write(bin)
+            w.close()
+            return (await new Response(ds.readable).text()).trim()
+          } catch (_) {
+            return ''
+          }
+        }
 
         // 1. Player, captions on as soon as a track exists.
         //    The iframe is built by hand (player.js's own oEmbed lookup 404s for unlisted ids + hash).
@@ -237,24 +252,30 @@
         iframe.title = 'Video player'
         $('player').appendChild(iframe)
         const player = new Vimeo.Player(iframe)
+        let locked = false // password / privacy gate still up in the player
         player.on('error', (e) => {
+          if (e && (e.name === 'PasswordError' || e.name === 'PrivacyError')) return // the player shows its own form
           $('summary').textContent = e && e.message ? e.message : 'The video could not be loaded.'
         })
-        try {
-          await player.ready()
+        const captionsOn = async () => {
           const tracks = await player.getTextTracks()
           if (tracks.length && !tracks.some((t) => t.mode === 'showing')) {
             const pick = (cc && tracks.find((t) => t.language === cc)) || tracks[0]
             await player.enableTextTrack(pick.language, pick.kind).catch(() => {})
           }
-        } catch (_) {
-          /* player unavailable — the error handler wrote the message */
+        }
+        try {
+          await player.ready()
+          await captionsOn()
+        } catch (e) {
+          // ready() rejects for password-protected / private videos until the viewer unlocks it.
+          locked = true
         }
 
         // 2. Title + description (= the summary) via oEmbed. Password-protected videos refuse this;
-        //    fall back to the player's title and hide the summary card.
+        //    the app then carries both in the link (t, d).
         let title = q.get('t') || ''
-        let description = ''
+        let description = await unpack(q.get('d'))
         try {
           // no-store: a rename in the app must show on the next open, not after the browser's cache expires.
           const r = await fetch('https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(vimeoUrl) + '&_=' + Date.now(), { cache: 'no-store' })
@@ -273,12 +294,34 @@
         setHeadings(rtl)
         document.title = title || 'Recording'
         $('title').textContent = title || ' '
-        if (description) {
-          $('summary').textContent = description
-          $('summary').dir = isRtl(description) ? 'rtl' : 'ltr'
-        } else $('summary-card').classList.add('hidden')
+        const showSummary = () => {
+          if (description) {
+            $('summary').textContent = description
+            $('summary').dir = isRtl(description) ? 'rtl' : 'ltr'
+            $('summary-card').classList.remove('hidden')
+          } else $('summary-card').classList.add('hidden')
+        }
+        if (locked) {
+          // Gated video: the text waits behind the same gate as the picture.
+          $('summary-card').classList.add('hidden')
+        } else showSummary()
 
-        // 3. Chapters straight from the player.
+        // 3. Chapters straight from the player — after the viewer unlocks it when it is gated.
+        const unlocked = () =>
+          new Promise((resolve) => {
+            if (!locked) return resolve()
+            player.on('loaded', () => resolve())
+            player.on('play', () => resolve())
+          })
+        await unlocked()
+        if (locked) {
+          locked = false
+          await captionsOn().catch(() => {})
+          if (!title) title = await player.getVideoTitle().catch(() => '')
+          document.title = title || 'Recording'
+          $('title').textContent = title || ' '
+          showSummary()
+        }
         let chapters = []
         try {
           chapters = await player.getChapters()
