@@ -12,7 +12,8 @@
         · title + description (= the Cannoli summary)  → oEmbed
         · chapters                                      → player.getChapters()
         · captions on from the first frame              → player.enableTextTrack(first track)
-      Optional params: cc=<lang> (preferred caption language), t=<title> and d=<deflate-raw + base64url
+      Optional params: cc=<lang> (preferred caption language) or cc=off (captions stay off until the
+      viewer presses CC), t=<title> and d=<deflate-raw + base64url
       summary> — the app adds both for password-protected / private videos, where Vimeo refuses oEmbed.
       Chapters and captions are read from the player once the viewer has unlocked it.
     -->
@@ -200,7 +201,10 @@
         const q = new URLSearchParams(location.search)
         const v = q.get('v')
         const h = q.get('h')
-        const cc = q.get('cc')
+        // cc=<lang> picks a caption language; cc=off leaves captions to the viewer's CC button.
+        const ccParam = q.get('cc')
+        const ccOff = ccParam === 'off'
+        const cc = ccOff ? null : ccParam
         const $ = (id) => document.getElementById(id)
         const isRtl = (s) => ((s || '').match(/[֐-ࣿ]/g) || []).length > ((s || '').match(/[A-Za-z]/g) || []).length
         const clock = (sec) => {
@@ -258,6 +262,7 @@
           $('summary').textContent = e && e.message ? e.message : 'The video could not be loaded.'
         })
         const captionsOn = async () => {
+          if (ccOff) return
           const tracks = await player.getTextTracks()
           if (tracks.length && !tracks.some((t) => t.mode === 'showing')) {
             const pick = (cc && tracks.find((t) => t.language === cc)) || tracks[0]
