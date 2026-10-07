@@ -261,8 +261,20 @@
           if (e && (e.name === 'PasswordError' || e.name === 'PrivacyError')) return // the player shows its own form
           $('summary').textContent = e && e.message ? e.message : 'The video could not be loaded.'
         })
+        // cc=off has to switch captions off, not merely skip switching them on: the player
+        // turns them on by itself for a viewer who has picked a caption language before
+        // (Vimeo remembers that per browser, across videos) — which is why the first version
+        // of this still showed subtitles on the owner's machine while a fresh browser was
+        // clean. One extra pass covers the player restoring that choice just after ready;
+        // after those two the viewer's own CC button is left alone.
+        let offPasses = 0
         const captionsOn = async () => {
-          if (ccOff) return
+          if (ccOff) {
+            if (offPasses++ > 1) return
+            await player.disableTextTrack().catch(() => {})
+            if (offPasses === 1) setTimeout(() => void captionsOn(), 1500)
+            return
+          }
           const tracks = await player.getTextTracks()
           if (tracks.length && !tracks.some((t) => t.mode === 'showing')) {
             const pick = (cc && tracks.find((t) => t.language === cc)) || tracks[0]
